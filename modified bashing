@@ -1,0 +1,714 @@
+client.keneanung = (function (keneanung) {
+    "use strict";
+    keneanung.bashing = (function () {
+
+        client.config = {
+            enabled: true,
+            warning: 500,
+            fleeing: 300,
+            autoflee: true,
+            autoraze: false,
+            razecommand: "none",
+            attackcommand: "kill",
+            prios: {}
+        };
+
+        client.gmcpArea = "";
+        client.gmcpTargetId = "";
+        client.gmcpStatusTarget = "None";
+
+        client.damage = 0;
+        client.healing = 0;
+        client.lastHealth = 0;
+        client.maxHealth = 0;
+
+        client.targetList = [];
+
+        client.roomContent = [];
+
+        client.attacking = -1;
+
+        client.attacks = 0;
+
+        client.fleeDirection = "n";
+        client.lastRoom = "";
+
+        client.colorify = function (str) {
+            client.pattern = /##(\w+)##/;
+            client.first = true;
+            client.match;
+            while (match = pattern.exec(str)) {
+                client.repl;
+                if (first && match[1] == "reset") {
+                    //skip a reset as the first tag...
+                } else if (match[1] == "reset") {
+                    repl = "</span>";
+                    first = true;
+                } else if (first) {
+                    repl = '<span style="color: ' + match[1] + '">';
+                    first = false;
+                } else {
+                    repl = '</span><span style="color: ' + match[1] + '">';
+                }
+                str = str.replace(pattern, repl);
+            }
+            if (!first) {
+                str += "</span>";
+            }
+            return str;
+        };
+
+        client.linkify = function (text, codeToRun, alt) {
+            client.a = $('<a ></a>');
+            a.attr('href', "javascript:void(0);");
+            a.text(text);
+            a.attr('onclick', codeToRun + ";return false;");
+            a.attr('title', alt);
+            return a.prop("outerHTML");
+        };
+
+        client.kecho = function (text) {
+            client.toEcho = "<p>##forestgreen##keneanung##reset##: " + text + "</p>";
+            client.colouredEcho = colorify(toEcho);
+            ow_Write("#output_main", colouredEcho);
+            console.log(text);
+        };
+
+        client.idOnly = function (list) {
+            client.ids = [];
+            for (client.i = 0; i < list.length; i++) {
+                ids.push(list[i].id);
+            }
+            return ids;
+        };
+
+        client.save = function () {
+            //client.configString = JSON.stringify(config);
+            if (!set_variable("keneanung.bashing.config", config)) {
+                kecho("##red##Couldn't save settings!");
+            } else {
+                //make sure the changes get uploaded to IRE...
+                if (settings_window && settings_window.set_system_vals) {
+                    settings_window.set_system_vals();
+                    settings_window.system_changed = false;
+                    client.system_changed = false;
+                    gmcp_save_system();
+                } else {
+                    kecho("##yellow##No settings window open. Please open it " +
+                    "(cogwheels lower right side) and click on 'Save " +
+                    "Client Settings' to keep your config.");
+                }
+            }
+        };
+
+        client.load = function () {
+            client.loadedConfig = get_variable("keneanung.bashing.config");
+            for (client.key in loadedConfig) {
+                if (loadedConfig.hasOwnProperty(key))
+                    config[key] = loadedConfig[key];
+            }
+        };
+
+        client.getPrio = function (item) {
+            client.prios = config.prios[gmcpArea] || [];
+            for (client.i = 0; i < prios.length; i++) {
+                if (item == prios[i]) {
+                    return i;
+                }
+            }
+            return -1;
+        };
+
+        client.addTarget = function (item) {
+            client.insertAt;
+
+            client.targetPrio = getPrio(item.name);
+
+            if (targetPrio == -1) {
+                return;
+            }
+
+            if (targetList.length == 0) {
+                targetList[0] = {
+                    id: item.id,
+                    name: item.name
+                }
+            } else {
+                //don't add stuff twice
+                for (client.i2 = 0; i2 < targetList.length; i2++) {
+                    if (targetList[i2].id == item.id) {
+                        return
+                    }
+                }
+
+                client.iStart = 0, iEnd = targetList.length - 1, iMid = 0;
+                client.found = false;
+
+                while (iStart <= iEnd) {
+                    iMid = Math.floor((iStart + iEnd) / 2);
+                    client.existingPrio = getPrio(targetList[iMid].name);
+
+                    if (targetPrio == existingPrio) {
+                        insertAt = iMid;
+                        found = true;
+                        break;
+                    } else if (existingPrio == -1 || targetPrio < existingPrio) {
+                        iEnd = iMid - 1;
+                    } else {
+                        iStart = iMid + 1;
+                    }
+                }
+
+                if (!found) {
+                    insertAt = iStart;
+                }
+
+                if (insertAt <= attacking && targetList.length >= attacking) {
+                    insertAt = attacking + 1;
+                }
+
+                targetList.splice(insertAt, 0, {id: item.id, name: item.name});
+
+            }
+        };
+
+        client.removeTarget = function (item) {
+            client.number = -1;
+            for (client.i = 0; i < targetList.length; i++) {
+                if (targetList[i].id == item.id) {
+                    number = i;
+                    break;
+                }
+            }
+
+            if (number > -1) {
+                targetList.splice(number, 1);
+                if (number <= attacking) {
+                    attacking--;
+                    setTarget();
+                }
+            }
+        };
+
+        client.difference = function (list1, list2) {
+            if (list1.length != list2.length) {
+                return true;
+            }
+
+            for (client.i = 0; i < list1.length; i++) {
+                if (list1[i] != list2[i]) {
+                    return true;
+                }
+            }
+
+            return false;
+        };
+
+        client.displayTargetList = function () {
+            kecho("Current target list:");
+            for (client.i = 0; i < targetList.length; i++) {
+                ow_Write("#output_main",
+                    "<span style='color: orange; white-space: pre-wrap'>     "
+                    + targetList[i].name + "</span>");
+            }
+            console.log(targetList);
+        };
+
+        client.emitEventsIfChanged = function (before, after) {
+            console.log("event");
+            if (difference(before, after)) {
+                run_function("keneanungBashingTargetListChanged", after, "ALL");
+                displayTargetList();
+                if (before[0] != after[0]) {
+                    run_function("keneanungBashingTargetListFirstChanged", after[0], "ALL");
+                }
+            }
+        };
+
+        client.setTarget = function () {
+            if (targetList.length == 0) {
+                client.targetSet = false;
+                if(typeof gmcpStatusTarget != "undefined" && gmcpStatusTarget != "None"){
+                    for(client.i = 0; i < roomContent.length; i++){
+                        client.cont = roomContent[i];
+                        if(typeof cont.attrib != "undefined" && cont.attrib.indexOf("m") > -1
+                            && cont.name.toLowerCase().indexOf(gmcpStatusTarget.toLowerCase()) > -1){
+                            targetList[targetList.length] = {
+                                id: cont.id,
+                                name: cont.name
+                            };
+                            targetSet = true;
+                        }
+                    }
+                }
+                if(!targetSet){
+                    clearTarget();
+                    stopAttack();
+                }else{
+                    attacking++;
+                }
+            } else {
+                if (attacking == -1 || targetList[attacking].id != gmcpTargetId) {
+                    attacking++;
+                }
+                send_GMCP("IRE.Target.Set", targetList[attacking].id + "");
+            }
+        };
+
+        client.clearTarget = function() {
+            send_GMCP('IRE.Target.Set "0"');
+            attacking = -1;
+        };
+
+        client.startAttack = function () {
+            if (attacking >= 0) {
+                client.trigger = reflex_find_by_name("trigger", "keneanung.bashing.queueTrigger");
+                reflex_enable(trigger);
+                send_direct("queue add eqbal keneanungki", false);
+            }
+        };
+
+        client.stopAttack = function () {
+            client.trigger = reflex_find_by_name("trigger", "keneanung.bashing.queueTrigger");
+            reflex_disable(trigger);
+            send_direct("cq all");
+            attacking = -1;
+        };
+
+        client.warnFlee = function () {
+            kecho("Better run or get ready to die!");
+        };
+
+        client.notifyFlee = function () {
+            kecho("Running as you have not enough health left.");
+        };
+
+        client.calcFleeValue = function(configValue){
+            client.isString = typeof(configValue) == "string";
+            if(isString && /%$/.test(configValue))
+            {
+                return Number(/^(\d+)/.exec(configValue)[1]) * maxHealth / 100;
+            }
+            else if(isString && /d$/.test(configValue))
+            {
+                return Number(/^(.+?)d/.exec(configValue)[1]) * damage / attacks;
+            }
+            else
+            {
+                return Number(configValue);
+            }
+        };
+
+        client.module = {};
+
+        module.roomInfoCallback = function (roomInfo) {
+            gmcpArea = roomInfo.area;
+
+            if(lastRoom == ""){
+                lastRoom = roomInfo.num;
+                fleeDirection = "n";
+            }
+            if(lastRoom == roomInfo.num){
+                return;
+            }
+
+            damage  = 0;
+            healing = 0;
+            attacks = 0;
+
+            if(attacking > -1){
+                clearTarget();
+                stopAttack();
+            }
+
+            client.exits = roomInfo.exits;
+            client.found = false;
+
+            for(client.direction in exits){
+                if(!exits.hasOwnProperty(direction)) continue;
+                if(exits[direction] == lastRoom){
+                    fleeDirection = direction;
+                    found = true;
+                    break;
+                }
+            }
+
+            if(!found && typeof roomInfo.ohmap == "undefined"){
+                kecho("##red##WARNING:##reset## No exit to flee found, reusing ##red##" + fleeDirection + "##reset##.")
+            }
+
+            lastRoom = roomInfo.num;
+        };
+
+        module.setGmcpTarget = function (target) {
+            gmcpTargetId = target;
+        };
+
+        module.vitalsCallback = function (vitals) {
+            client.health = Number(vitals.hp);
+            maxHealth = Number(vitals.maxhp);
+            client.difference = lastHealth - health;
+            if (difference > 0) {
+                damage += difference;
+            } else {
+                healing += Math.abs(difference);
+            }
+
+            lastHealth = health;
+        };
+
+        module.statusCallback = function (status){
+            if(typeof status.target != "undefined"){
+                gmcpStatusTarget = status.target;
+            }
+        };
+
+        module.attackButton = function (){
+            if (attacking == -1) {
+                setTarget();
+                startAttack();
+                kecho("Nothing will stand in our way.\n");
+            } else{
+                clearTarget();
+                stopAttack();
+                kecho("Lets save them for later.\n");
+            }
+         };
+
+        module.flee = function() {
+            stopAttack();
+            send_direct("queue prepend eqbal " + fleeDirection)
+        };
+
+        module.handleShield = function() {
+            if(config.autoraze){
+                send_direct("queue prepend eqbal keneanungra", false);
+            }
+        };
+
+        module.attack = function(){
+            attacks++;
+            client.avgDmg = damage / attacks;
+            client.avgHeal = healing / attacks;
+
+            client.estimatedDmg = avgDmg * 2 - avgHeal;
+
+            client.fleeat = calcFleeValue(config.fleeing);
+            client.warnat = calcFleeValue(config.warning);
+
+            if(config.autoflee && estimatedDmg > lastHealth - fleeat){
+                notifyFlee();
+                module.flee();
+                return;
+            }else if(estimatedDmg > lastHealth - warnat){
+                warnFlee();
+            }
+            send_direct("queue add eqbal keneanungki", false);
+        };
+
+        module.addPossibleTarget = function (targetName) {
+            client.prios = config.prios;
+
+            if (!prios[gmcpArea]) {
+                prios[gmcpArea] = [];
+                kecho("Added '" + gmcpArea + "' as new area.");
+            }
+
+            if ($.inArray(targetName, prios[gmcpArea]) == -1) {
+                client.before = idOnly(targetList);
+
+                prios[gmcpArea].push(targetName);
+                kecho("Added the new possible target '" + targetName + "' to the end of "
+                + "the priority list.");
+
+                save();
+
+                for (client.i = 0; i < roomContent.length; i++) {
+                    addTarget(roomContent[i]);
+                }
+
+                client.after = idOnly(targetList);
+
+                emitEventsIfChanged(before, after);
+            }
+        };
+
+        module.ItemAddCallback = function (arg) {
+            if (arg.location != "room" || !config.enabled) {
+                return;
+            }
+
+            client.before = idOnly(targetList);
+
+            roomContent.push(arg.item);
+            addTarget(arg.item);
+
+            client.after = idOnly(targetList);
+
+            emitEventsIfChanged(before, after);
+        };
+
+        module.ItemRemoveCallback = function (arg) {
+            if (arg.location != "room" || !config.enabled) {
+                return;
+            }
+
+            client.before = idOnly(targetList);
+            client.id = arg.item.id;
+            for (client.i = 0; i < roomContent.length; i++) {
+                if (roomContent[i].id == id) {
+                    roomContent.splice(i, 1);
+                    break;
+                }
+            }
+            removeTarget(arg.item);
+
+            client.after = idOnly(targetList);
+
+            emitEventsIfChanged(before, after);
+        };
+
+        module.ItemListCallback = function (arg) {
+            if (arg.location != "room" || !config.enabled) {
+                return;
+            }
+
+            client.backup = targetList;
+            client.before = idOnly(targetList);
+            targetList = [];
+            roomContent = [];
+
+            client.items = arg.items;
+
+            for (client.i = 0; i < items.length; i++) {
+                roomContent[roomContent.length] = items[i];
+                addTarget(items[i]);
+            }
+
+            client.after = idOnly(targetList);
+
+            if (before.length == after.length && $(before).not(after).length == 0) {
+                targetList = backup;
+                return
+            }
+
+            emitEventsIfChanged(before, after);
+        };
+
+        module.setFleeDirection = function(dir){
+            fleeDirection = dir;
+            kecho("Fleeing to the ##red##" + dir + "##reset##.")
+        };
+
+        module.showConfig = function () {
+            client.content = $("<div ></div>");
+            client.selectEnabled = $("<select ></select>", {
+                name: "enabled",
+                class: "bashingSelect ui-state-default ui-corner-all ui-widget",
+                style: "padding-top: 0px; padding-bottom: 0px;"
+            });
+            client.vals = ["on", "off"];
+            client.i, opt;
+            for (i = 0; i < vals.length; i++) {
+                opt = $("<option ></option>", {value: vals[i], text: vals[i]});
+                if ((vals[i] == "on") == config.enabled) {
+                    opt.attr("selected", "selected");
+                }
+                selectEnabled.append(opt);
+            }
+            $("<span ></span>").text("The basher is currently ").append(selectEnabled).appendTo(content);
+            $("<br />").appendTo(content);
+
+            client.selectFlee = $("<select ></select>", {
+                name: "autoflee",
+                class: "bashingSelect ui-state-default ui-corner-all ui-widget",
+                style: "padding-top: 0px; padding-bottom: 0px;"
+            });
+            for (i = 0; i < vals.length; i++) {
+                opt = $("<option ></option>", {value: vals[i], text: vals[i]});
+                if ((vals[i] == "on") == config.autoflee) {
+                    opt.attr("selected", "selected");
+                }
+                selectFlee.append(opt);
+            }
+            $("<span ></span>").text("Autofleeing is currently ").append(selectFlee).appendTo(content);
+            $("<br />").appendTo(content);
+
+            $("<span ></span>").text("Issueing a warning at ").append($("<input />", {
+                value: config.warning,
+                name: "warning",
+                class: "bashingInput ui-state-default ui-corner-all ui-widget"
+            })).appendTo(content);
+            $("<br />").appendTo(content);
+            $("<span ></span>").text("Fleeing at ").append($("<input />", {
+                value: config.fleeing,
+                name: "fleeing",
+                class: "bashingInput ui-state-default ui-corner-all ui-widget"
+            })).appendTo(content);
+            $("<br />").appendTo(content);
+
+            client.selectRaze = $("<select ></select>", {
+                name: "autoraze",
+                class: "bashingSelect ui-state-default ui-corner-all ui-widget",
+                style: "padding-top: 0px; padding-bottom: 0px;"
+            });
+            for (i = 0; i < vals.length; i++) {
+                opt = $("<option ></option>", {value: vals[i], text: vals[i]});
+                if ((vals[i] == "on") == config.autoraze) {
+                    opt.attr("selected", "selected");
+                }
+                selectRaze.append(opt);
+            }
+            $("<span ></span>").text("Autoraze is currently ").append(selectRaze).appendTo(content);
+            $("<br />").appendTo(content);
+            $("<span ></span>").text("Using this command for razing: ").append($("<input />", {
+                value: config.razecommand,
+                name: "razecommand",
+                class: "bashingInput ui-state-default ui-corner-all ui-widget"
+            })).appendTo(content);
+            $("<br />").appendTo(content);
+            $("<span ></span>").text("Using this command for attacking: ").append($("<input />", {
+                value: config.attackcommand,
+                name: "attackcommand",
+                class: "bashingInput ui-state-default ui-corner-all ui-widget"
+            })).appendTo(content);
+            $("<br />").appendTo(content);
+            $("<br />").appendTo(content);
+            $("<button ></button>", {
+                text: "save",
+                class: "ui-state-default ui-corner-all",
+                id: "keneanung-bashing-save"
+            }).on("click", function () {
+                client.conf = {};
+                client.oldAttackCommand = config.attackcommand;
+                client.oldRazeCommand   = config.razecommand;
+                $(".bashingInput").each(function (_, elem) {
+                    conf[elem.name] = elem.value;
+                });
+                $(".bashingSelect").each(function (_, elem) {
+                    conf[elem.name] = elem[elem.selectedIndex].value == "on";
+                });
+                for (client.key in conf) {
+                    if (!conf.hasOwnProperty(key)) continue;
+                    config[key] = conf[key];
+                }
+                
+                if(config.attackcommand != oldAttackCommand){
+                    send_direct("setalias keneanungki " + config.attackcommand)
+                }
+                if(config.razecommand != oldRazeCommand){
+                    send_direct("setalias keneanungra " + config.razecommand)
+                }
+                
+                save();
+                content.dialog("close");
+            }).appendTo(content);
+
+            content.dialog({
+                close: function(){
+                    content.empty();
+                },
+                title: "Bashing Settings"
+            });
+        };
+
+        module.showPrios = function(){
+
+            client.body = $("<div ></div>");
+            client.select = $('<select id="keneanung-bashing-prio-areas" class="ui-widget ui-state-default ui-corner-all" style= "padding-top: 0; padding-bottom: 0;"></select>');
+            client.fillList = function () {
+                client.selectDOM = select[0];
+                client.area = selectDOM[selectDOM.selectedIndex].text;
+                client.targets = config.prios[area];
+                client.list = $("#keneanung-bashing-sort");
+                list.empty();
+                for (client.i = 0; i < targets.length; i++) {
+                    list.append("<li> " + targets[i] + "</li>");
+                }
+            };
+            select.on("change", fillList);
+            body.append(select);
+
+            client.updatePrios = function () {
+                client.newPrios = [];
+                $("#keneanung-bashing-sort").children().each(function (index) {
+                    newPrios[index] = $.trim($(this).text());
+                });
+                client.selectDOM = select[0];
+                client.area = selectDOM[selectDOM.selectedIndex].text;
+                config.prios[area] = newPrios;
+            };
+
+            for (client.area in config.prios) {
+                if (config.prios.hasOwnProperty(area)) {
+                    select.append("<option>" + area + "</option>");
+                }
+            }
+
+            client.prioList = $('<fieldset class="ui-widget ui-state-default ui-corner-all">');
+            prioList.append($("<legend>Priority list</legend>"));
+            prioList.append($('<ul id="keneanung-bashing-sort" class="ui-widget ui-state-default ui-corner-all" style="list-style-type: none; padding:0; margin:0;"></ul>')
+                .sortable({
+                    stop: updatePrios,
+                    connectWith: "#keneanung-bashing-trash"
+                }).disableSelection()
+            );
+            body.append(prioList);
+
+            client.trash = $('<fieldset class="ui-widget ui-state-default ui-corner-all">');
+            trash.append($("<legend>Trash</legend>"));
+            trash.append($('<ul id="keneanung-bashing-trash" class="ui-widget ui-state-default ui-corner-all" style="list-style-type: none; padding:0; margin:0;"></ul>')
+                .sortable({
+                    stop: updatePrios,
+                    connectWith: "#keneanung-bashing-sort"
+                }).disableSelection()
+            );
+            body.append(trash);
+
+            client.saveButton = $("<button ></button>", {
+                text: "save",
+                class: "ui-state-default ui-corner-all",
+                id: "keneanung-bashing-prios-save"
+            });
+            saveButton.on("click", function () {
+                save();
+                body.dialog("close");
+            });
+            body.append(saveButton);
+
+            body.dialog({
+                close: function(){
+                    body.empty();
+                },
+                title: "Bashing Priorities"
+            });
+
+            fillList();
+        };
+
+        load();
+        send_direct("setalias keneanungki " + config.attackcommand);
+        send_direct("setalias keneanungra " + config.razecommand);
+
+        client.buttonsDefined = false;
+
+        for(client.buttonIndex in buttons){
+            if(buttons[buttonIndex] != null){
+                if(buttons[buttonIndex].script == "keneanung.bashing.attackButton()"){
+                    buttonsDefined = true;
+                    break;
+                }
+            }
+        }
+        
+        if(!buttonsDefined){
+            buttons_count = buttons_count + 2;
+            bottom_button_set(buttons_count - 1, "", "keneanung.bashing.attackButton()", "Start attacking", false);
+            bottom_button_set(buttons_count, "", "keneanung.bashing.flee()", "Flee", false);
+        }
+
+        return module;
+
+    }());
+    return keneanung;
+}(keneanung || {}));
